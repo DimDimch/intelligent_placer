@@ -1,12 +1,11 @@
 from dataclasses import dataclass
 from typing import List
-
 import numpy as np
 
 
 """
-Данный класс является основой для работы со всеми многоугольниками в программе.
-По своей сути он представляет обертку над классом polytope из библиотеки polytope
+This class is the basis for working with all polygons in the program.
+At its core, it represents a wrapper over the polytope class from the polytope library
 """
 
 
@@ -16,31 +15,31 @@ class Figure:
 
 
 """
-Данный класс хранит в себе информацию о распознанном предмете (все возможные предметы заранее
-известны и находятся в каталоге items)
+This class stores information about the recognized item (all possible items
+are known in advance and are located in the items catalog)
 """
 
 
 @dataclass(eq=True)
 class Item:
-    name: str  # уникальное наименование предмета
+    name: str  # unique item name
     approx_figure: Figure
 
 
 """
-Данный класс хранит в себе информацию о распознанном многоугольнике
+This class stores information about the recognized polygon
 """
 
 
 @dataclass(eq=True)
 class Polygon:
-    is_convex: bool  # является ли выпуклым
-    num_of_edges: int  # примерное число ребер
+    is_convex: bool
+    num_of_edges: int  # approximate number of edges
     data: Figure
 
 
 """
-Данный метод делает pretty print and save всех результатов эксперимента
+This method makes a pretty print and save of all the results of the test
 """
 
 
