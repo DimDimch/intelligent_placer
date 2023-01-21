@@ -1,52 +1,52 @@
+import json
+from dataclasses import dataclass
 from typing import List
-from utils import Item, Polygon, Figure
-from enum import Enum
+from IPython.core.display import display, Image
+from shapely.geometry import shape
+from shapely.geometry import Polygon
+
 import numpy as np
 import cv2
 import imutils
-import matplotlib.pyplot as plt
-import math
-import collections
-from imageio import imread, imsave
-from skimage.color import rgb2gray, label2rgb
-from skimage.transform import hough_line, hough_line_peaks, warp, AffineTransform
-from skimage.feature import canny, corner_harris, corner_peaks, corner_fast, corner_subpix, match_descriptors, ORB
-from skimage.filters import roberts, sobel, scharr, prewitt
-from skimage.segmentation import watershed
-from skimage.morphology import binary_closing, binary_erosion
-from skimage.measure import ransac
-from scipy import ndimage as ndi
-import os
-
-class ItemsCollection(Enum):
-    cup_holder = Item(name='Подставка', approx_figure=Figure(np.array([])))
-    scotch = Item(name='Скотч', approx_figure=Figure(np.array([])))
-    toy = Item(name='Игрушка', approx_figure=Figure(np.array([])))
-    calculator = Item(name='Калькулятор', approx_figure=Figure(np.array([])))
-    usb = Item(name='Флешка', approx_figure=Figure(np.array([])))
-    screwdriver = Item(name='Отвертка', approx_figure=Figure(np.array([])))
-    car = Item(name='Машинка', approx_figure=Figure(np.array([])))
-    drugs = Item(name='Таблетки', approx_figure=Figure(np.array([])))
-    badge = Item(name='Значок', approx_figure=Figure(np.array([])))
-    scissors = Item(name='Ножницы', approx_figure=Figure(np.array([])))
+from ultralytics import YOLO
 
 
-def find_group_median(contour: np.array, groups: list) -> np.array:
-    def find_median_and_del(group: list):
-        global contour
-        sum_x, sum_y = 0, 0
-        for i in group:
-            sum_x += contour[i][0][0]
-            sum_y += contour[i][0][1]
-        return sum_x / len(group), sum_y / len(group)
-    fix_contour = np.array([[[0, 0]]])
-    for group in groups:
-        m_x, m_y = find_median_and_del(group)
-        fix_contour = np.concatenate((fix_contour, [[[int(m_x), int(m_y)]]]))
-    return fix_contour[1:]
+def get_figure(fig_name: str):
+    with open('figures.json', 'r') as f:
+        data = json.loads(f.read())
+    if fig_name != 'scotch':
+        return shape(data[fig_name])
+    else:
+        return shape(data[fig_name]['outside']).difference(shape(data[fig_name]['inside']))
 
 
-def preprocess(path_to_image: str, draw: bool = False):
+model = YOLO('intelligent_placer_lib/models/best.pt')
+
+
+@dataclass(eq=True)
+class Item:
+    name: str  # unique item name
+    id: int
+    approx_figure: Polygon
+    rotate: bool
+    meta: dict = None
+
+
+ItemsCollection = {
+    0: Item(name='calculator', id=0, approx_figure=get_figure('calculator'), rotate=True),
+    1: Item(name='car', id=1, approx_figure=get_figure('car'), rotate=True),
+    2: Item(name='cup_holder', id=2, approx_figure=get_figure('cup_holder'), rotate=False),
+    3: Item(name='icon', id=3, approx_figure=get_figure('icon'), rotate=False),
+    4: Item(name='scissors', id=4, approx_figure=get_figure('scissors'), rotate=True),
+    5: Item(name='scotch', id=5, approx_figure=get_figure('scotch'), rotate=False, meta={'inside': ('icon', 'car', 'toy')}),
+    6: Item(name='screwdriver', id=6, approx_figure=get_figure('screwdriver'), rotate=True),
+    7: Item(name='tablets', id=7, approx_figure=get_figure('tablets'), rotate=True),
+    8: Item(name='toy', id=8, approx_figure=get_figure('toy'), rotate=False),
+    9: Item(name='usb', id=9, approx_figure=get_figure('usb'), rotate=True),
+}
+
+
+def find_polygon(path_to_image: str):
     image = cv2.imread(path_to_image, cv2.IMREAD_COLOR)
     image = cv2.resize(image, (512, 384))
     orig = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -109,38 +109,44 @@ def preprocess(path_to_image: str, draw: bool = False):
 
     transformMatrix = cv2.getPerspectiveTransform(rect, dst)
     scan = cv2.warpPerspective(orig, transformMatrix, (maxWidth, maxHeight))
+    scan = cv2.resize(scan, (500, 353))
+
+    grayScan = cv2.cvtColor(scan, cv2.COLOR_BGR2GRAY)
+    grayScanBlur = cv2.blur(grayScan, (6, 6))
+    edgedScan = cv2.Canny(grayScanBlur, 30, 100)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    dilate = cv2.dilate(edgedScan, kernel, iterations=1)
+    contours, _ = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    scan_copy = scan.copy()
+    cv2.drawContours(scan_copy, contours, -1, (0, 255, 0), 2)
+
+    polygon = None
+    if len(contours) > 0:
+        contour = np.squeeze(contours[0])
+        polygon = Polygon(contour)
+        # polygon = scale(Polygon(contour), xfact=-1, origin=(1, 0))
+        # polygon = rotate(polygon, angle=180, origin='center')
+
+    return polygon
+
+
+def recognize(path_to_items: str, path_to_polygon: str, draw: bool = False, ax=None) -> (List[Item], Polygon):
+    # preprocess for items image
+    items_image = cv2.imread(path_to_items, cv2.IMREAD_COLOR)
+    items_image = cv2.resize(items_image, (640, 640))
 
     if draw:
-        fig, ax = plt.subplots(1, 4)
-        fig.set_figheight(9)
-        fig.set_figwidth(16)
-        fig.tight_layout()
-        ax[0].set_title(path_to_image)
-        ax[0].imshow(orig)
-        ax[1].set_title('edged original image')
-        ax[1].imshow(edgedImage, cmap='gray')
-        ax[2].set_title('find sheet of paper')
-        ax[2].imshow(image, cmap='gray')
-        ax[3].set_title('cropped sheet')
-        ax[3].imshow(scan, cmap='gray')
+        ax[0].imshow(cv2.resize(cv2.imread(path_to_items, cv2.IMREAD_COLOR), (500, 353)))
+        ax[1].imshow(cv2.resize(cv2.imread(path_to_polygon, cv2.IMREAD_COLOR), (500, 353)))
 
-    return scan
-
-
-def recognize(path_to_items: str, path_to_polygon: str, draw: bool = False) -> (List[Item], Polygon):
-    items_image = preprocess(path_to_items, draw)
-    polygon_image = preprocess(path_to_polygon, draw)
-    return find_items(items_image), find_polygon(polygon_image)
+    return find_items(items_image), find_polygon(path_to_polygon)
 
 
 def find_items(items_image: np.array) -> List[Item]:
-    result = list()
-    result.append(ItemsCollection.toy.value)
-    result.append(ItemsCollection.car.value)
-    return result
-
-
-def find_polygon(polygon_image: np.array) -> Polygon:
-
-    result = Polygon(is_convex=True, num_of_edges=5, data=Figure(np.array([])))
+    results = model.predict(source=items_image, save=False)
+    items_labels = list(set(results[0].boxes.cls.tolist()))
+    result = []
+    for item in items_labels:
+        result.append(ItemsCollection[item])
     return result
