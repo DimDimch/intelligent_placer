@@ -1,0 +1,21 @@
+names:
+- calculator
+- car
+- cup_holder
+- icon
+- lighter
+- scissors
+- scotch
+- screwdriver
+- tablets
+- toy
+nc: 10
+roboflow:
+  license: CC BY 4.0
+  project: intelligent-placer-v1
+  url: https://universe.roboflow.com/intelligent-placer/intelligent-placer-v1/dataset/2
+  version: 2
+  workspace: intelligent-placer
+test: ../test/images
+train: Intelligent-Placer-v1-2/train/images
+val: Intelligent-Placer-v1-2/valid/images
